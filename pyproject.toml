@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.24.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "avito-contact-bot"
+version = "0.1.0"
+description = "Manual Avito chat/call export to Google Sheets via Telegram button"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "google-api-python-client>=2.170.0,<3",
+  "google-auth>=2.29.0,<3",
+  "python-dotenv>=1.0.1,<2",
+  "python-telegram-bot>=21.0,<22",
+  "requests>=2.32.3,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0,<9",
+]
+
+[project.scripts]
+avito-contact-bot = "avito_contact_bot.bot:main"
+avito-contact-cli = "avito_contact_bot.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/avito_contact_bot"]
