@@ -236,9 +236,27 @@ def _datetime_from(data: dict[str, Any] | None, keys: tuple[str, ...]) -> dateti
         return None
     for key in keys:
         value = data.get(key)
+        if isinstance(value, (int, float)):
+            timestamp = float(value)
+            if timestamp > 1_000_000_000_000:
+                timestamp /= 1000.0
+            try:
+                return datetime.fromtimestamp(timestamp, UTC)
+            except (OverflowError, OSError, ValueError):
+                continue
         if isinstance(value, str):
+            if value.isdigit():
+                timestamp = float(value)
+                if timestamp > 1_000_000_000_000:
+                    timestamp /= 1000.0
+                try:
+                    return datetime.fromtimestamp(timestamp, UTC)
+                except (OverflowError, OSError, ValueError):
+                    continue
             parsed = parse_iso_datetime(value)
             if parsed:
+                if parsed.tzinfo is None:
+                    return parsed.replace(tzinfo=UTC)
                 return parsed
     return None
 
@@ -257,8 +275,21 @@ def _guess_chat_source(chat: dict[str, Any]) -> str:
                 value = nested.get(key)
                 if isinstance(value, str) and value.strip():
                     return value.strip()
+            nested_value = nested.get("value")
+            if isinstance(nested_value, dict):
+                for key in ("url", "link"):
+                    value = nested_value.get(key)
+                    if isinstance(value, str) and value.strip():
+                        return value.strip()
 
     item_id = _string_from(chat, ("item_id", "itemId", "ad_id", "adId"))
+    context = chat.get("context")
+    if isinstance(context, dict):
+        context_value = context.get("value")
+        if isinstance(context_value, dict):
+            context_item_id = _string_from(context_value, ("id", "item_id", "itemId", "ad_id", "adId"))
+            if context_item_id:
+                item_id = context_item_id
     if item_id:
         return f"https://www.avito.ru/items/{item_id}"
     return ""
@@ -266,6 +297,46 @@ def _guess_chat_source(chat: dict[str, Any]) -> str:
 
 
 def _guess_chat_contact(chat: dict[str, Any], message: dict[str, Any] | None) -> str:
+    users_raw = chat.get("users")
+    users: list[dict[str, Any]] = []
+    if isinstance(users_raw, list):
+        users = [item for item in users_raw if isinstance(item, dict)]
+
+    if users:
+        context_value = chat.get("context")
+        owner_user_id: str | None = None
+        if isinstance(context_value, dict):
+            ctx_value = context_value.get("value")
+            if isinstance(ctx_value, dict):
+                owner_user_id = _string_from(ctx_value, ("user_id", "userId"))
+
+        selected_user: dict[str, Any] | None = None
+        if owner_user_id:
+            for user in users:
+                user_id = _string_from(user, ("id", "user_id", "userId"))
+                if user_id and user_id != owner_user_id:
+                    selected_user = user
+                    break
+
+        if not selected_user and message:
+            author_id = _string_from(message, ("author_id", "authorId", "user_id", "userId", "sender_id", "senderId"))
+            if author_id:
+                for user in users:
+                    user_id = _string_from(user, ("id", "user_id", "userId"))
+                    if user_id == author_id:
+                        selected_user = user
+                        break
+
+        if not selected_user:
+            selected_user = users[0]
+
+        if selected_user:
+            name = _string_from(selected_user, ("name", "title"))
+            user_id = _string_from(selected_user, ("id", "user_id", "userId"))
+            label = _format_contact_label(name=name, contact_id=user_id)
+            if label:
+                return label
+
     for source in (message or {}, chat):
         value = _string_from(source, ("author_id", "authorId", "user_id", "userId", "sender_id", "senderId"))
         if value:
@@ -273,8 +344,22 @@ def _guess_chat_contact(chat: dict[str, Any], message: dict[str, Any] | None) ->
 
     user = chat.get("user")
     if isinstance(user, dict):
-        value = _string_from(user, ("id", "name", "title"))
-        if value:
-            return value
+        user_id = _string_from(user, ("id", "user_id", "userId"))
+        name = _string_from(user, ("name", "title"))
+        label = _format_contact_label(name=name, contact_id=user_id)
+        if label:
+            return label
 
     return _string_from(chat, ("id", "chat_id", "chatId")) or ""
+
+
+def _format_contact_label(*, name: str | None, contact_id: str | None) -> str:
+    clean_name = (name or "").strip()
+    clean_id = (contact_id or "").strip()
+    if clean_name and clean_id and clean_name != clean_id:
+        return f"{clean_name} ({clean_id})"
+    if clean_name:
+        return clean_name
+    if clean_id:
+        return clean_id
+    return ""
