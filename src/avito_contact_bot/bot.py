@@ -42,7 +42,11 @@ def _build_accounts_keyboard(storage: Storage) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     text=f"Выгрузить #{account.id} · {account.name}",
                     callback_data=f"sync:{account.id}",
-                )
+                ),
+                InlineKeyboardButton(
+                    text=f"Ссылка #{account.id}",
+                    callback_data=f"table:{account.id}",
+                ),
             ]
         )
 
@@ -82,7 +86,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     storage: Storage = context.application.bot_data["storage"]
     keyboard = _build_accounts_keyboard(storage)
     await update.message.reply_text(
-        "Трекер Avito готов. Нажмите кнопку для ручной выгрузки в таблицу.",
+        "Трекер Avito готов.\nНажмите `Выгрузить` для обновления или `Ссылка` для быстрого перехода в таблицу.",
         reply_markup=keyboard,
     )
 
@@ -149,6 +153,21 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if query.data == "menu:refresh":
         await query.edit_message_reply_markup(reply_markup=_build_accounts_keyboard(storage))
+        return
+
+    if query.data.startswith("table:"):
+        try:
+            account_id = int(query.data.split(":", 1)[1])
+        except ValueError:
+            await query.edit_message_text("Неверный account_id")
+            return
+        account = storage.get_account(account_id)
+        if not account or not account.enabled:
+            await query.edit_message_text("Аккаунт не найден или отключен")
+            return
+        await query.message.reply_text(
+            f"Таблица для #{account.id} {account.name}:\n{_sheet_link(account.sheet_id)}"
+        )
         return
 
     if not query.data.startswith("sync:"):
