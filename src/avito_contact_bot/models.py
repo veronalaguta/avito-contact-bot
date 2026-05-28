@@ -25,4 +25,8 @@ class ContactEvent:
     contact_type: str
     source: str
     contact_id: str
+    contact_name: str
     status: str
+    chat_id: str | None = None
+    chat_label: str = ""
+    text_sample: str = ""

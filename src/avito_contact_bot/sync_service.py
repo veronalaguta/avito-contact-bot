@@ -47,6 +47,11 @@ class SyncService:
                 events=unique_events,
                 timezone=self.settings.timezone,
             )
+            self.sheets.append_chat_exports(
+                spreadsheet_id=account.sheet_id,
+                events=unique_events,
+                timezone=self.settings.timezone,
+            )
             self.storage.save_events(account.id, unique_events)
             self.storage.mark_sync(
                 account.id,

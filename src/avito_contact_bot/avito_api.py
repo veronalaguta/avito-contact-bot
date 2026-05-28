@@ -88,16 +88,28 @@ class AvitoClient:
         return chats
 
     def get_last_message(self, token: str, account_id: str, chat_id: str) -> dict[str, Any] | None:
+        messages = self.get_messages(token, account_id, chat_id, limit=1)
+        if not messages:
+            return None
+        return messages[0]
+
+    def get_messages(
+        self,
+        token: str,
+        account_id: str,
+        chat_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
         payload = self._request(
             "GET",
             f"/messenger/v3/accounts/{account_id}/chats/{chat_id}/messages/",
             token=token,
-            params={"limit": 1, "offset": 0},
+            params={"limit": limit, "offset": offset},
         )
         messages = _extract_list(payload, preferred_keys=("messages", "items", "result"))
-        if not messages:
-            return None
-        return messages[0]
+        return messages
 
     def list_calls(self, token: str) -> list[dict[str, Any]]:
         payload = self._request("POST", "/calltracking/v1/getCalls/", token=token, json={})
@@ -113,6 +125,7 @@ def build_chat_events(
     include_calls: bool,
 ) -> list[ContactEvent]:
     events: list[ContactEvent] = []
+    sample_message_limit = 40
 
     chats = avito.list_chats(token, account_id)
     for chat in chats:
@@ -120,9 +133,17 @@ def build_chat_events(
         if not chat_id:
             continue
 
-        last_message = _nested_dict(chat, ("last_message", "lastMessage"))
-        if not last_message:
-            last_message = avito.get_last_message(token, account_id, chat_id)
+        messages = avito.get_messages(token, account_id, chat_id, limit=sample_message_limit)
+        newest_message = None
+        if messages:
+            newest_message = max(
+                messages,
+                key=lambda item: (
+                    _datetime_from(item, ("created", "created_at", "createdAt", "timestamp")) or datetime.min.replace(tzinfo=UTC)
+                ),
+            )
+
+        last_message = _nested_dict(chat, ("last_message", "lastMessage")) or newest_message
 
         occurred_at = (
             _datetime_from(last_message, ("created", "created_at", "createdAt", "timestamp"))
@@ -132,7 +153,8 @@ def build_chat_events(
 
         message_id = _string_from(last_message, ("id", "message_id", "messageId")) or occurred_at.isoformat()
         source = _guess_chat_source(chat)
-        contact_id = _guess_chat_contact(chat, last_message)
+        contact_id, contact_name = _guess_chat_contact(chat, last_message)
+        text_sample = _build_text_sample(chat, messages)
 
         events.append(
             ContactEvent(
@@ -141,7 +163,11 @@ def build_chat_events(
                 contact_type="Сообщение",
                 source=source,
                 contact_id=contact_id,
+                contact_name=contact_name,
                 status="Чат обработан",
+                chat_id=chat_id,
+                chat_label="",
+                text_sample=text_sample,
             )
         )
 
@@ -158,7 +184,11 @@ def build_chat_events(
                     contact_type="Звонок",
                     source="",
                     contact_id=phone or marker,
+                    contact_name="",
                     status="Звонок обработан",
+                    chat_id=None,
+                    chat_label="",
+                    text_sample="",
                 )
             )
 
@@ -296,20 +326,14 @@ def _guess_chat_source(chat: dict[str, Any]) -> str:
 
 
 
-def _guess_chat_contact(chat: dict[str, Any], message: dict[str, Any] | None) -> str:
+def _guess_chat_contact(chat: dict[str, Any], message: dict[str, Any] | None) -> tuple[str, str]:
     users_raw = chat.get("users")
     users: list[dict[str, Any]] = []
     if isinstance(users_raw, list):
         users = [item for item in users_raw if isinstance(item, dict)]
 
     if users:
-        context_value = chat.get("context")
-        owner_user_id: str | None = None
-        if isinstance(context_value, dict):
-            ctx_value = context_value.get("value")
-            if isinstance(ctx_value, dict):
-                owner_user_id = _string_from(ctx_value, ("user_id", "userId"))
-
+        owner_user_id = _guess_owner_user_id(chat)
         selected_user: dict[str, Any] | None = None
         if owner_user_id:
             for user in users:
@@ -333,33 +357,93 @@ def _guess_chat_contact(chat: dict[str, Any], message: dict[str, Any] | None) ->
         if selected_user:
             name = _string_from(selected_user, ("name", "title"))
             user_id = _string_from(selected_user, ("id", "user_id", "userId"))
-            label = _format_contact_label(name=name, contact_id=user_id)
-            if label:
-                return label
+            if user_id or name:
+                return user_id or "", name or ""
 
     for source in (message or {}, chat):
         value = _string_from(source, ("author_id", "authorId", "user_id", "userId", "sender_id", "senderId"))
         if value:
-            return value
+            return value, ""
 
     user = chat.get("user")
     if isinstance(user, dict):
         user_id = _string_from(user, ("id", "user_id", "userId"))
         name = _string_from(user, ("name", "title"))
-        label = _format_contact_label(name=name, contact_id=user_id)
-        if label:
-            return label
+        if user_id or name:
+            return user_id or "", name or ""
 
-    return _string_from(chat, ("id", "chat_id", "chatId")) or ""
+    fallback = _string_from(chat, ("id", "chat_id", "chatId")) or ""
+    return fallback, ""
 
 
-def _format_contact_label(*, name: str | None, contact_id: str | None) -> str:
-    clean_name = (name or "").strip()
-    clean_id = (contact_id or "").strip()
-    if clean_name and clean_id and clean_name != clean_id:
-        return f"{clean_name} ({clean_id})"
-    if clean_name:
-        return clean_name
-    if clean_id:
-        return clean_id
+def _guess_owner_user_id(chat: dict[str, Any]) -> str | None:
+    context_value = chat.get("context")
+    if isinstance(context_value, dict):
+        ctx_value = context_value.get("value")
+        if isinstance(ctx_value, dict):
+            return _string_from(ctx_value, ("user_id", "userId"))
+    return None
+
+
+def _build_text_sample(chat: dict[str, Any], messages: list[dict[str, Any]]) -> str:
+    if not messages:
+        return ""
+
+    users_by_id = _build_user_names_by_id(chat)
+    owner_user_id = _guess_owner_user_id(chat)
+
+    lines: list[str] = []
+    ordered = sorted(
+        messages,
+        key=lambda item: (
+            _datetime_from(item, ("created", "created_at", "createdAt", "timestamp")) or datetime.min.replace(tzinfo=UTC)
+        ),
+    )
+    for message in ordered:
+        text = _message_text(message)
+        if not text:
+            continue
+        occurred = _datetime_from(message, ("created", "created_at", "createdAt", "timestamp"))
+        if occurred:
+            dt = occurred.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            dt = "0000-00-00 00:00:00"
+
+        author_id = _string_from(message, ("author_id", "authorId", "user_id", "userId", "sender_id", "senderId"))
+        author_name = users_by_id.get(author_id or "")
+        if author_id and owner_user_id and author_id == owner_user_id:
+            speaker = "🏢 Менеджер"
+        elif author_name:
+            speaker = f"👤 {author_name}"
+        else:
+            speaker = "👤 Клиент"
+
+        lines.append(f"[{dt}] {speaker}: {text}")
+
+    return "\n".join(lines)[:10000]
+
+
+def _build_user_names_by_id(chat: dict[str, Any]) -> dict[str, str]:
+    users_raw = chat.get("users")
+    if not isinstance(users_raw, list):
+        return {}
+    result: dict[str, str] = {}
+    for item in users_raw:
+        if not isinstance(item, dict):
+            continue
+        user_id = _string_from(item, ("id", "user_id", "userId"))
+        name = _string_from(item, ("name", "title"))
+        if user_id and name:
+            result[user_id] = name
+    return result
+
+
+def _message_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, dict):
+        text = content.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    if isinstance(content, str) and content.strip():
+        return content.strip()
     return ""
