@@ -47,6 +47,7 @@ class SyncService:
                 events=unique_events,
                 timezone=self.settings.timezone,
             )
+            self.storage.save_events(account.id, unique_events)
             self.storage.mark_sync(
                 account.id,
                 status="ok",

@@ -125,7 +125,22 @@ class Storage:
         if not events:
             return []
 
-        new_events: list[ContactEvent] = []
+        event_uids = [item.event_uid for item in events]
+        placeholders = ",".join("?" for _ in event_uids)
+        query = (
+            f"SELECT event_uid FROM synced_events "
+            f"WHERE account_id = ? AND event_uid IN ({placeholders})"
+        )
+        with self._connect() as conn:
+            rows = conn.execute(query, (account_id, *event_uids)).fetchall()
+
+        existing = {str(row["event_uid"]) for row in rows}
+        return [event for event in events if event.event_uid not in existing]
+
+    def save_events(self, account_id: int, events: list[ContactEvent]) -> None:
+        if not events:
+            return
+
         created_at = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             for event in events:
@@ -152,10 +167,8 @@ class Storage:
                             created_at,
                         ),
                     )
-                    new_events.append(event)
                 except sqlite3.IntegrityError:
                     continue
-        return new_events
 
     @staticmethod
     def _to_account(row: sqlite3.Row) -> Account:

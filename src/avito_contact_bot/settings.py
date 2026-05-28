@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 @dataclass(slots=True)
 class Settings:
     telegram_bot_token: str
-    google_service_account_json: Path
+    google_service_account_json: Path | None
     database_path: Path
     timezone: ZoneInfo
     avito_api_base: str
@@ -41,15 +41,14 @@ def load_settings(*, require_bot_token: bool = True) -> Settings:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required")
 
     creds_path = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-    if not creds_path:
-        raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON is required")
+    google_service_account_json = Path(creds_path).expanduser().resolve() if creds_path else None
 
     db_path = os.getenv("DATABASE_PATH", "./data/contact_tracker.db").strip()
     tz_name = os.getenv("TIMEZONE", "Europe/Moscow").strip()
 
     settings = Settings(
         telegram_bot_token=bot_token,
-        google_service_account_json=Path(creds_path).expanduser().resolve(),
+        google_service_account_json=google_service_account_json,
         database_path=Path(db_path).expanduser().resolve(),
         timezone=ZoneInfo(tz_name),
         avito_api_base=os.getenv("AVITO_API_BASE", "https://api.avito.ru").rstrip("/"),

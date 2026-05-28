@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+import google.auth
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -11,9 +11,12 @@ from .models import ContactEvent
 
 
 class SheetsWriter:
-    def __init__(self, service_account_json: Path):
+    def __init__(self, service_account_json: Path | None):
         scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-        credentials = Credentials.from_service_account_file(str(service_account_json), scopes=scopes)
+        if service_account_json:
+            credentials = Credentials.from_service_account_file(str(service_account_json), scopes=scopes)
+        else:
+            credentials, _ = google.auth.default(scopes=scopes)
         self.service = build("sheets", "v4", credentials=credentials, cache_discovery=False)
 
     def append_events(

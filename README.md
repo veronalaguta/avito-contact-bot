@@ -31,13 +31,18 @@ pip install -e .
 3. Скачайте JSON-ключ.
 4. Дайте доступ этому service account к вашей таблице (как редактор).
 
+Альтернатива без service account:
+- оставьте `GOOGLE_SERVICE_ACCOUNT_JSON` пустым,
+- выполните локально `gcloud auth application-default login`,
+- бот будет использовать ваши пользовательские Google credentials (ADC).
+
 ## 3) Переменные окружения
 ```bash
 cp .env.example .env
 ```
 Заполните `.env`:
 - `TELEGRAM_BOT_TOKEN`
-- `GOOGLE_SERVICE_ACCOUNT_JSON`
+- `GOOGLE_SERVICE_ACCOUNT_JSON` (опционально, можно оставить пустым при использовании ADC)
 - `BOT_ALLOWED_USER_IDS` (ваш Telegram `user_id`, можно узнать через `/myid`)
 
 ## 4) Добавление аккаунта Avito
