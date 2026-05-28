@@ -15,7 +15,8 @@ class SyncResult:
     account_name: str
     fetched_events: int
     new_events: int
-    appended_rows: int
+    appended_main_rows: int
+    appended_chat_rows: int
 
 
 class SyncService:
@@ -47,7 +48,7 @@ class SyncService:
                 events=unique_events,
                 timezone=self.settings.timezone,
             )
-            self.sheets.append_chat_exports(
+            appended_chat_rows = self.sheets.append_chat_exports(
                 spreadsheet_id=account.sheet_id,
                 events=unique_events,
                 timezone=self.settings.timezone,
@@ -56,14 +57,18 @@ class SyncService:
             self.storage.mark_sync(
                 account.id,
                 status="ok",
-                note=f"fetched={len(fetched)} new={len(unique_events)} appended={appended_rows}",
+                note=(
+                    f"fetched={len(fetched)} new={len(unique_events)} "
+                    f"main={appended_rows} chats={appended_chat_rows}"
+                ),
             )
             return SyncResult(
                 account_id=account.id,
                 account_name=account.name,
                 fetched_events=len(fetched),
                 new_events=len(unique_events),
-                appended_rows=appended_rows,
+                appended_main_rows=appended_rows,
+                appended_chat_rows=appended_chat_rows,
             )
         except AvitoApiError as exc:
             self.storage.mark_sync(account.id, status="error", note=str(exc))

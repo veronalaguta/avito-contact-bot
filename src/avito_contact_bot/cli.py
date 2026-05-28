@@ -99,7 +99,8 @@ def main(argv: list[str] | None = None) -> int:
         result = service.sync_account(account)
         print(
             f"Synced account #{result.account_id} ({result.account_name}): "
-            f"fetched={result.fetched_events}, new={result.new_events}, appended={result.appended_rows}"
+            f"fetched={result.fetched_events}, new={result.new_events}, "
+            f"main={result.appended_main_rows}, chats={result.appended_chat_rows}"
         )
         return 0
 

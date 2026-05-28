@@ -55,6 +55,10 @@ def _access_denied_text() -> str:
     return "Нет доступа. Добавьте ваш Telegram user_id в BOT_ALLOWED_USER_IDS в .env"
 
 
+def _sheet_link(sheet_id: str) -> str:
+    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit"
+
+
 
 def require_access(handler: Callable[[Update, ContextTypes.DEFAULT_TYPE], asyncio.Future]):
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -96,7 +100,7 @@ async def accounts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         state = "активен" if item.enabled else "выключен"
         lines.append(
             f"#{item.id} {item.name} ({state})\n"
-            f"sheet: {item.sheet_id}\n"
+            f"sheet: {_sheet_link(item.sheet_id)}\n"
             f"last sync: {item.last_sync_at or '-'} ({item.last_sync_status or '-'})"
         )
 
@@ -109,13 +113,28 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Команды:\n"
         "/start - кнопки ручной выгрузки\n"
         "/accounts - список аккаунтов\n"
-        "/myid - показать ваш Telegram user_id"
+        "/myid - показать ваш Telegram user_id\n"
+        "/table - ссылка на таблицу"
     )
 
 
 async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id if update.effective_user else None
     await update.message.reply_text(f"Ваш user_id: {user_id}")
+
+
+@require_access
+async def table(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    storage: Storage = context.application.bot_data["storage"]
+    accounts = storage.list_accounts(enabled_only=True)
+    if not accounts:
+        await update.message.reply_text("Аккаунтов пока нет.")
+        return
+
+    lines = ["Ссылки на таблицы:"]
+    for item in accounts:
+        lines.append(f"#{item.id} {item.name}: {_sheet_link(item.sheet_id)}")
+    await update.message.reply_text("\n".join(lines))
 
 
 @require_access
@@ -152,11 +171,15 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     service: SyncService = context.application.bot_data["sync_service"]
     try:
         result = await asyncio.to_thread(service.sync_account, account)
+        link = _sheet_link(account.sheet_id)
         await query.message.reply_text(
             f"Готово: #{result.account_id} {result.account_name}\n"
             f"получено: {result.fetched_events}\n"
             f"новых: {result.new_events}\n"
-            f"добавлено строк: {result.appended_rows}"
+            f"добавлено в Лист1: {result.appended_main_rows}\n"
+            f"добавлено в Чаты: {result.appended_chat_rows}\n"
+            f"таблица: {link}\n"
+            "Листы: Лист1 и Чаты"
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("sync failed")
@@ -179,6 +202,7 @@ def main() -> None:
     app.add_handler(CommandHandler("accounts", accounts))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("myid", myid))
+    app.add_handler(CommandHandler("table", table))
     app.add_handler(CallbackQueryHandler(on_callback))
 
     logger.info("Bot is starting")
