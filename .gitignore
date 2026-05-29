@@ -7,4 +7,6 @@ __pycache__/
 .env
 .secrets/
 data/
+logs/
+run/
 .DS_Store

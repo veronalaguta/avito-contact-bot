@@ -5,6 +5,7 @@ import logging
 from typing import Callable
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import BadRequest
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
@@ -144,7 +145,14 @@ async def table(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 @require_access
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest as exc:
+        # Old inline button callbacks can expire on Telegram side after long inactivity.
+        if "Query is too old" in str(exc) or "query id is invalid" in str(exc).lower():
+            logger.warning("Skipping stale callback query: %s", exc)
+        else:
+            raise
 
     if not query.data:
         return
